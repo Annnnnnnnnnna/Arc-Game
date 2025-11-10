@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cyber Maze — Arc</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #050811;
+      color: #e5e7eb;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    #game-root {
+      position: fixed;
+      inset: 0;
+    }
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .hud {
+      position: fixed;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.85);
+      border: 1px solid rgba(148,163,184,0.35);
+      backdrop-filter: blur(10px);
+      font-size: 14px;
+      z-index: 10;
+    }
+    .hud span {
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.9);
+      border: 1px solid rgba(55,65,81,0.9);
+    }
+    .hint {
+      position: fixed;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.75);
+      border: 1px solid rgba(148,163,184,0.35);
+      backdrop-filter: blur(8px);
+      font-size: 13px;
+      z-index: 10;
+    }
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+      background: radial-gradient(circle at top, rgba(59,130,246,0.12), transparent 55%),
+                  radial-gradient(circle at bottom, rgba(236,72,153,0.12), transparent 55%),
+                  rgba(3,7,18,0.88);
+      backdrop-filter: blur(16px);
+    }
+    .overlay.show {
+      display: flex;
+    }
+    .overlay-box {
+      padding: 20px 24px;
+      border-radius: 18px;
+      background: rgba(15,23,42,0.95);
+      border: 1px solid rgba(148,163,184,0.65);
+      box-shadow: 0 18px 45px rgba(0,0,0,0.6);
+      text-align: center;
+      max-width: 320px;
+    }
+    .overlay-box h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .overlay-box p {
+      margin: 4px 0 14px;
+      font-size: 14px;
+      color: #cbd5f5;
+    }
+    .overlay-box button {
+      border: none;
+      border-radius: 999px;
+      padding: 9px 16px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+      background: linear-gradient(90deg,#3b82f6,#ec4899);
+      color: #fff;
+    }
+    .overlay-box button:hover {
+      filter: brightness(1.06);
+    }
+  </style>
+</head>
+<body>
+  <div id="game-root">
+    <canvas id="game"></canvas>
+    <div class="hud">
+      <span id="levelLabel">Level: 1</span>
+      <span id="deathsLabel">Crashes: 0</span>
+    </div>
+    <div class="hint">Move with WASD or Arrow Keys · Reach the neon portal · Avoid firewalls</div>
+    <div class="overlay" id="overlay">
+      <div class="overlay-box">
+        <h1 id="overlayTitle">LEVEL COMPLETE</h1>
+        <p id="overlayText"></p>
+        <button id="overlayButton">Continue</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ==================== SETUP ==================== */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let width = window.innerWidth;
+let height = window.innerHeight;
+canvas.width = width;
+canvas.height = height;
+
+window.addEventListener("resize", () => {
+  width = window.innerWidth;
+  height = window.innerHeight;
+  canvas.width = width;
+  canvas.height = height;
+  updateTileSize();
+});
+
+const keys = {};
+window.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; });
+window.addEventListener("keyup",   e => { keys[e.key.toLowerCase()] = false; });
+
+/* ==================== LEVEL DATA ==================== */
+/*
+  # = wall
+  . = empty
+  S = start
+  E = exit
+*/
+
+const levels = [
+  {
+    grid: [
+      "################",
+      "#S....#........#",
+      "#.#######.######",
+      "#......#.......#",
+      "######.#.#####.#",
+      "#......#.....#.#",
+      "#.######.###.#.#",
+      "#........#...#E#",
+      "################"
+    ],
+    enemies: [
+      { row: 1, col: 7, axis: "y", min: 1, max: 7, speed: 2.0 },
+      { row: 5, col: 3, axis: "x", min: 1, max: 13, speed: 2.4 }
+    ]
+  },
+  {
+    grid: [
+      "####################",
+      "#S.....#...........#",
+      "#.###.#.#.########.#",
+      "#...#.#.#......#..E#",
+      "###.#.#.######.#.###",
+      "#...#.#......#.#...#",
+      "#.###.######.#.###.#",
+      "#..............#...#",
+      "####################"
+    ],
+    enemies: [
+      { row: 1, col: 10, axis: "y", min: 1, max: 7, speed: 2.8 },
+      { row: 6, col: 5, axis: "x", min: 1, max: 18, speed: 3.1 },
+      { row: 3, col: 8, axis: "y", min: 1, max: 6, speed: 2.9 }
+    ]
+  }
+];
+
+let currentLevelIndex = 0;
+let currentLevel = null;
+
+let cols = 0;
+let rows = 0;
+let tileSize = 40;
+let offsetX = 0;
+let offsetY = 0;
+
+let player = { x: 0, y: 0, size: 0, speed: 4 };
+let exitPortal = { x: 0, y: 0, size: 0 };
+let enemies = [];
+let deaths = 0;
+
+function updateTileSize() {
+  cols = currentLevel.grid[0].length;
+  rows = currentLevel.grid.length;
+  tileSize = Math.floor(Math.min(width / cols, height / rows));
+  offsetX = (width - cols * tileSize) / 2;
+  offsetY = (height - rows * tileSize) / 2;
+  player.size = tileSize * 0.6;
+  exitPortal.size = tileSize * 0.7;
+}
+
+/* ==================== INIT LEVEL ==================== */
+
+function loadLevel(index) {
+  currentLevelIndex = index;
+  currentLevel = levels[index];
+  const grid = currentLevel.grid;
+
+  // find start & exit
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const ch = grid[r][c];
+      if (ch === "S") {
+        player.x = c + 0.5;
+        player.y = r + 0.5;
+      }
+      if (ch === "E") {
+        exitPortal.x = c + 0.5;
+        exitPortal.y = r + 0.5;
+      }
+    }
+  }
+
+  enemies = currentLevel.enemies.map(e => ({
+    axis: e.axis,
+    min: e.min,
+    max: e.max,
+    speed: e.speed / 60, // per frame in grid units
+    pos: e.axis === "x" ? e.col + 0.5 : e.row + 0.5,
+    other: e.axis === "x" ? e.row + 0.5 : e.col + 0.5,
+    dir: 1
+  }));
+
+  updateTileSize();
+  document.getElementById("levelLabel").textContent = "Level: " + (currentLevelIndex + 1);
+}
+
+/* ==================== HELPERS ==================== */
+
+function isWall(col, row) {
+  if (row < 0 || row >= rows || col < 0 || col >= cols) return true;
+  return currentLevel.grid[row][col] === "#";
+}
+
+function rectWallCollision(x, y, size) {
+  const left   = x - size / 2;
+  const right  = x + size / 2;
+  const top    = y - size / 2;
+  const bottom = y + size / 2;
+
+  const minCol = Math.floor(left);
+  const maxCol = Math.floor(right);
+  const minRow = Math.floor(top);
+  const maxRow = Math.floor(bottom);
+
+  for (let r = minRow; r <= maxRow; r++) {
+    for (let c = minCol; c <= maxCol; c++) {
+      if (isWall(c, r)) return true;
+    }
+  }
+  return false;
+}
+
+/* ==================== OVERLAY ==================== */
+const overlay = document.getElementById("overlay");
+const overlayTitle = document.getElementById("overlayTitle");
+const overlayText = document.getElementById("overlayText");
+const overlayButton = document.getElementById("overlayButton");
+
+overlayButton.addEventListener("click", () => {
+  overlay.classList.remove("show");
+  if (overlay.dataset.action === "next") {
+    loadLevel(currentLevelIndex + 1);
+  } else if (overlay.dataset.action === "restart") {
+    deaths = 0;
+    document.getElementById("deathsLabel").textContent = "Crashes: " + deaths;
+    loadLevel(0);
+  }
+});
+
+/* ==================== GAME LOOP ==================== */
+
+function update() {
+  const speed = player.speed / 60;
+
+  let dx = 0, dy = 0;
+  if (keys["arrowup"] || keys["w"]) dy -= speed;
+  if (keys["arrowdown"] || keys["s"]) dy += speed;
+  if (keys["arrowleft"] || keys["a"]) dx -= speed;
+  if (keys["arrowright"] || keys["d"]) dx += speed;
+
+  // normalize diagonal
+  if (dx !== 0 && dy !== 0) {
+    const inv = 1 / Math.sqrt(2);
+    dx *= inv; dy *= inv;
+  }
+
+  let newX = player.x + dx;
+  let newY = player.y + dy;
+
+  if (!rectWallCollision(newX, player.y, player.size / tileSize)) {
+    player.x = newX;
+  }
+  if (!rectWallCollision(player.x, newY, player.size / tileSize)) {
+    player.y = newY;
+  }
+
+  // update enemies
+  for (const e of enemies) {
+    e.pos += e.speed * e.dir;
+    if (e.pos < e.min + 0.5 || e.pos > e.max + 0.5) {
+      e.dir *= -1;
+      e.pos = Math.max(e.min + 0.5, Math.min(e.max + 0.5, e.pos));
+    }
+  }
+
+  // collision with enemies
+  for (const e of enemies) {
+    const ex = e.axis === "x" ? e.pos : e.other;
+    const ey = e.axis === "x" ? e.other : e.pos;
+    const dist = Math.hypot(player.x - ex, player.y - ey);
+    if (dist < 0.45) {
+      deaths++;
+      document.getElementById("deathsLabel").textContent = "Crashes: " + deaths;
+      // reset player to start
+      loadLevel(currentLevelIndex);
+      break;
+    }
+  }
+
+  // reach exit
+  const dExit = Math.hypot(player.x - exitPortal.x, player.y - exitPortal.y);
+  if (dExit < 0.4) {
+    if (currentLevelIndex < levels.length - 1) {
+      overlayTitle.textContent = "LEVEL COMPLETE";
+      overlayText.textContent = "Welcome deeper into Arc. Ready for the next maze?";
+      overlay.dataset.action = "next";
+      overlay.classList.add("show");
+    } else {
+      overlayTitle.textContent = "ARC CLEARED";
+      overlayText.textContent = "You escaped the cyber labyrinth of Arc. Play again?";
+      overlay.dataset.action = "restart";
+      overlay.classList.add("show");
+    }
+  }
+}
+
+/* ==================== DRAW ==================== */
+
+function drawBackground() {
+  // gradient
+  const g = ctx.createRadialGradient(
+    width * 0.2, height * 0.1, 0,
+    width * 0.5, height * 0.8, Math.max(width, height)
+  );
+  g.addColorStop(0, "#020617");
+  g.addColorStop(0.4, "#020617");
+  g.addColorStop(0.7, "#020617");
+  g.addColorStop(1, "#000000");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, width, height);
+
+  // subtle grid
+  ctx.save();
+  ctx.strokeStyle = "rgba(31,41,55,0.5)";
+  ctx.lineWidth = 1;
+  const step = 40;
+  ctx.beginPath();
+  for (let x = (width % step); x < width; x += step) {
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+  }
+  for (let y = (height % step); y < height; y += step) {
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  // giant "ARC"
+  ctx.save();
+  ctx.globalAlpha = 0.06;
+  ctx.fillStyle = "#38bdf8";
+  const size = Math.min(width, height) * 0.6;
+  ctx.font = `900 ${size}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("ARC", width / 2, height / 2);
+  ctx.restore();
+}
+
+function draw() {
+  drawBackground();
+
+  // maze
+  ctx.save();
+  ctx.translate(offsetX, offsetY);
+  const grid = currentLevel.grid;
+
+  // walls
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (grid[r][c] === "#") {
+        const x = c * tileSize;
+        const y = r * tileSize;
+        const grad = ctx.createLinearGradient(x, y, x + tileSize, y + tileSize);
+        grad.addColorStop(0, "rgba(56,189,248,0.15)");
+        grad.addColorStop(1, "rgba(129,140,248,0.6)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(x + 3, y + 3, tileSize - 6, tileSize - 6);
+
+        ctx.strokeStyle = "rgba(148,163,184,0.8)";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x + 3, y + 3, tileSize - 6, tileSize - 6);
+      }
+    }
+  }
+
+  // exit portal
+  const ex = exitPortal.x * tileSize;
+  const ey = exitPortal.y * tileSize;
+  const rPortal = exitPortal.size * tileSize / 2;
+  const portalGrad = ctx.createRadialGradient(ex, ey, 2, ex, ey, rPortal);
+  portalGrad.addColorStop(0, "rgba(129,140,248,0.2)");
+  portalGrad.addColorStop(0.7, "rgba(94,234,212,0.7)");
+  portalGrad.addColorStop(1, "rgba(45,212,191,0.05)");
+  ctx.fillStyle = portalGrad;
+  ctx.beginPath();
+  ctx.arc(ex, ey, rPortal, 0, Math.PI * 2);
+  ctx.fill();
+
+  // enemies
+  for (const e of enemies) {
+    const gx = (e.axis === "x" ? e.pos : e.other) * tileSize;
+    const gy = (e.axis === "x" ? e.other : e.pos) * tileSize;
+    const rs = tileSize * 0.3;
+    const enemyGrad = ctx.createRadialGradient(gx, gy, 2, gx, gy, rs);
+    enemyGrad.addColorStop(0, "rgba(248,113,113,0.2)");
+    enemyGrad.addColorStop(0.6, "rgba(248,113,113,0.9)");
+    enemyGrad.addColorStop(1, "rgba(248,113,113,0.1)");
+    ctx.fillStyle = enemyGrad;
+    ctx.beginPath();
+    ctx.arc(gx, gy, rs, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(248,113,113,0.9)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(gx - rs * 0.8, gy - rs * 0.8, rs * 1.6, rs * 1.6);
+  }
+
+  // player
+  const px = player.x * tileSize;
+  const py = player.y * tileSize;
+  const ps = player.size * tileSize / 2;
+  const playerGrad = ctx.createLinearGradient(px - ps, py - ps, px + ps, py + ps);
+  playerGrad.addColorStop(0, "#38bdf8");
+  playerGrad.addColorStop(1, "#a855f7");
+  ctx.fillStyle = playerGrad;
+  ctx.beginPath();
+  ctx.roundRect(px - ps, py - ps, ps * 2, ps * 2, 6);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(148,163,184,0.9)";
+  ctx.lineWidth = 1.4;
+  ctx.strokeRect(px - ps, py - ps, ps * 2, ps * 2);
+
+  ctx.restore();
+}
+
+/* ==================== MAIN LOOP ==================== */
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+/* ==================== START ==================== */
+
+loadLevel(0);
+loop();
+</script>
+</body>
+</html>
+
